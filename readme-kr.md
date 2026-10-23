@@ -2,7 +2,9 @@
 
 [English](readme.md)
 
-클래식 ESP32가 OpenHeadUnit과 Android Auto 폰 사이에 서 있는 브로커입니다. FYT BLINK/DUDUAUTO와 같이, 폰과는 클래식 블루투스 RFCOMM으로 Android Auto 채널을 열고, 헤드유닛과는 BLE GATT write / indicate로 그 바이트를 중계합니다.
+클래식 ESP32가 OpenHeadUnit(https://github.com/andreknieriem/open-headunit)과 Android Auto 폰 사이에 서 있는 브로커입니다. FYT BLINK/DUDUAUTO와 같이, 폰과는 클래식 블루투스 RFCOMM으로 Android Auto 채널을 열고, 헤드유닛과는 BLE GATT write / indicate로 그 바이트를 중계합니다.
+
+open-headunit(https://github.com/andreknieriem/open-headunit)의 코드에 이에 대한 내용이 적용(머지)되지 않았다면, https://github.com/kendrickkim/headunit-revived/tree/with-bt-aa-broker 의 코드를 적용해야 합니다.
 
 ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 넘긴 바이트는 폰 RFCOMM에 쓰고, 폰이 보낸 바이트는 헤드유닛으로 indicate합니다. 핸드셰이크와 WifiStart/WifiInfo는 헤드유닛이 담당합니다.
 
