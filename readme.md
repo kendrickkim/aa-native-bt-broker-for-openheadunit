@@ -2,7 +2,9 @@
 
 [한국어](readme-kr.md)
 
-A classic ESP32 sits between OpenHeadUnit and an Android Auto phone. Like FYT BLINK/DUDUAUTO, it opens the Android Auto channel to the phone over classic Bluetooth RFCOMM, and relays those bytes to the head unit over BLE GATT write / indicate.
+A classic ESP32 sits between [OpenHeadUnit](https://github.com/andreknieriem/open-headunit) and an Android Auto phone. Like FYT BLINK/DUDUAUTO, it opens the Android Auto channel to the phone over classic Bluetooth RFCOMM, and relays those bytes to the head unit over BLE GATT write / indicate.
+
+If that support is not yet merged into [open-headunit](https://github.com/andreknieriem/open-headunit), apply the code from https://github.com/kendrickkim/headunit-revived/tree/with-bt-aa-broker.
 
 The ESP32 does not parse Android Auto (WPP) payloads. Bytes from the head unit go to the phone RFCOMM; bytes from the phone are indicated to the head unit. Handshake and WifiStart/WifiInfo stay on the head unit.
 
