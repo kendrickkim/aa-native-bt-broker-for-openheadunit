@@ -72,7 +72,7 @@ public:
         const uint8_t *data = characteristic->getData();
         size_t len = characteristic->getLength();
         if (data != nullptr && len > 0 && len <= BROKER_ATT_CHUNK) {
-            broker_post(kind, data, (uint16_t)len, nullptr, 0);
+            broker_post(kind, data, (uint16_t)len, nullptr, 0, 0);
         }
     }
 };

@@ -35,7 +35,7 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
     if (event == ESP_HF_CLIENT_CONNECTION_STATE_EVT && param != nullptr) {
         s_state = (uint8_t)param->conn_stat.state;
         Serial.printf("HFP HF state %u\n", s_state);
-        broker_post(MSG_HFP, nullptr, 0, param->conn_stat.remote_bda, s_state);
+        broker_post(MSG_HFP, nullptr, 0, param->conn_stat.remote_bda, s_state, 0);
     } else if (event == ESP_HF_CLIENT_AUDIO_STATE_EVT && param != nullptr) {
         Serial.printf("HFP audio state %u\n", (unsigned)param->audio_stat.state);
     }

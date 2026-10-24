@@ -21,6 +21,7 @@ struct Msg {
     uint8_t kind;
     uint8_t extra;
     uint16_t len;
+    uint32_t gen;
     uint8_t bda[6];
     uint8_t data[BROKER_ATT_CHUNK];
 };
@@ -52,7 +53,10 @@ static const FrameLabel k_labels[] = {
     {EVT_CREDIT, "CREDIT", nullptr},
 };
 
-static QueueHandle_t s_q;
+/** Control / credit / connection events — never crowded out by phone RX. */
+static QueueHandle_t s_ctrl_q;
+/** Phone RFCOMM RX only. */
+static QueueHandle_t s_phone_q;
 static BrokerFrag s_cmd_frag;
 static BrokerFrag s_data_frag;
 static uint8_t s_frame[BROKER_HEADER_LEN + BROKER_MAX_PAYLOAD];
@@ -88,6 +92,23 @@ static uint8_t s_credit;
 static const uint8_t CREDIT_CAP = 8;
 /** 프로젝션 소켓이 올라가 있다고 헤드유닛이 알린 상태. 상태 표시용. */
 static int s_projection;
+/** Active RFCOMM connection generation from MSG_RFCOMM_OPEN. */
+static uint32_t s_rfcomm_gen;
+
+/** Bytes waiting for credit / BLE indicate room. */
+#define RX_PEND_CAP (BROKER_ATT_CHUNK * 8)
+static uint8_t s_rx_pend[RX_PEND_CAP];
+static uint16_t s_rx_pend_len;
+
+/** One in-flight HU→phone chunk retained across RFCOMM congestion. */
+static uint8_t s_tx_pend[BROKER_MAX_PAYLOAD];
+static uint16_t s_tx_pend_len;
+static uint8_t s_tx_tries;
+static const uint8_t TX_TRY_CAP = 40;
+
+static void fail_rfcomm_stream(uint16_t code);
+static void flush_phone_pending(void);
+static void flush_tx_pending(void);
 
 /** 리틀엔디언 16비트를 쓴다. */
 static void put_u16(uint8_t *p, uint16_t value)
@@ -190,6 +211,18 @@ static void emit_error(uint16_t code)
     emit(EVT_ERROR, BROKER_CH_CONTROL, body, sizeof(body), 0);
 }
 
+/** Drop the RFCOMM session after a silent loss would leave WPP incomplete. */
+static void fail_rfcomm_stream(uint16_t code)
+{
+    Serial.printf("RFCOMM stream failed, code=%u\n", code);
+    s_rx_pend_len = 0;
+    s_tx_pend_len = 0;
+    s_tx_tries = 0;
+    s_credit = 0;
+    emit_error(code);
+    rfcomm_disconnect();
+}
+
 /** 페어링, RFCOMM, HFP, 네트워크 세대가 들어 있는 24바이트 상태를 보낸다. */
 static void emit_status(void)
 {
@@ -223,7 +256,8 @@ static void emit_status(void)
     body[2] = hfp_hf_state();
     body[3] = (uint8_t)(rfcomm_is_open() ? 1 : 0);
     put_u16(body + 4, mtu);
-    body[6] = (uint8_t)(s_q ? uxQueueMessagesWaiting(s_q) : 0);
+    body[6] = (uint8_t)((s_ctrl_q ? uxQueueMessagesWaiting(s_ctrl_q) : 0) +
+                         (s_phone_q ? uxQueueMessagesWaiting(s_phone_q) : 0));
     /* body[7]은 헤드유닛이 아직 소진하지 않은 RX 크레딧. */
     body[7] = s_credit;
     put_u16(body + 8, s_dropped);
@@ -233,21 +267,80 @@ static void emit_status(void)
     emit(EVT_STATUS, BROKER_CH_CONTROL, body, sizeof(body), 0);
 }
 
+static int pend_append(const uint8_t *data, uint16_t len)
+{
+    if (data == nullptr || len == 0) {
+        return 0;
+    }
+    if ((uint16_t)(s_rx_pend_len + len) > RX_PEND_CAP) {
+        return -1;
+    }
+    memcpy(s_rx_pend + s_rx_pend_len, data, len);
+    s_rx_pend_len = (uint16_t)(s_rx_pend_len + len);
+    return 0;
+}
+
+static void pend_consume(uint16_t n)
+{
+    if (n >= s_rx_pend_len) {
+        s_rx_pend_len = 0;
+        return;
+    }
+    memmove(s_rx_pend, s_rx_pend + n, s_rx_pend_len - n);
+    s_rx_pend_len = (uint16_t)(s_rx_pend_len - n);
+}
+
 /** 폰 RFCOMM 바이트를 DATA_RFCOMM_RX로 헤드유닛에 넘긴다. BLINK의 ZB 중계와 같다. */
 static void forward_phone_rx(const uint8_t *data, uint16_t len)
 {
     if (!s_aa || data == nullptr || len == 0) {
         return;
     }
-    if (!hu_ble_data_ready()) {
-        return;
-    }
-    if (s_credit == 0) {
-        s_dropped++;
+    if (!hu_ble_data_ready() || s_credit == 0) {
+        if (pend_append(data, len) != 0) {
+            fail_rfcomm_stream(BROKER_ERR_OVERFLOW);
+        }
         return;
     }
     s_credit--;
     emit(DATA_RFCOMM_RX, BROKER_CH_RFCOMM, data, len, 1);
+}
+
+static void flush_phone_pending(void)
+{
+    while (s_rx_pend_len > 0 && s_credit > 0 && hu_ble_data_ready()) {
+        uint16_t n = s_rx_pend_len;
+        if (n > BROKER_ATT_CHUNK) {
+            n = BROKER_ATT_CHUNK;
+        }
+        s_credit--;
+        emit(DATA_RFCOMM_RX, BROKER_CH_RFCOMM, s_rx_pend, n, 1);
+        pend_consume(n);
+    }
+}
+
+static void flush_tx_pending(void)
+{
+    if (s_tx_pend_len == 0) {
+        return;
+    }
+    if (!rfcomm_is_open()) {
+        s_tx_pend_len = 0;
+        s_tx_tries = 0;
+        return;
+    }
+    if (rfcomm_is_congested()) {
+        return;
+    }
+    if (rfcomm_send(s_tx_pend, s_tx_pend_len) == 0) {
+        s_tx_pend_len = 0;
+        s_tx_tries = 0;
+        return;
+    }
+    s_tx_tries++;
+    if (s_tx_tries >= TX_TRY_CAP) {
+        fail_rfcomm_stream(BROKER_ERR_RFCOMM);
+    }
 }
 
 /** 헤드유닛이 준 크레딧을 쌓는다. */
@@ -264,6 +357,7 @@ static void add_credit(uint8_t extra)
         extra = room;
     }
     s_credit = (uint8_t)(s_credit + extra);
+    flush_phone_pending();
 }
 
 /** 스키마 0x01 스냅샷의 generation을 읽고, 형식이 아니면 기존 값을 유지한다. */
@@ -301,6 +395,8 @@ static void prepare_new_phone(void)
     rfcomm_disconnect();
     s_projection = 0;
     s_credit = 0;
+    s_rx_pend_len = 0;
+    s_tx_pend_len = 0;
     hfp_hf_forget_last();
     rfcomm_clear_bonds();
     Serial.println("cleared phone bonds for new pairing");
@@ -415,6 +511,7 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
     case CMD_AA_DISABLE:
         s_aa = 0;
         s_credit = 0;
+        s_rx_pend_len = 0;
         emit_status();
         break;
     case CMD_PROJECTION_UP:
@@ -453,16 +550,28 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         break;
     case DATA_RFCOMM_TX:
         /* 헤드유닛이 보낸 WPP/핸드셰이크 바이트를 폰 RFCOMM으로 중계한다. */
-        if (!rfcomm_is_open() || payload == nullptr) {
+        if (!rfcomm_is_open() || payload == nullptr || len == 0) {
             emit_error(BROKER_ERR_RFCOMM);
             break;
         }
 #if BROKER_LOG_DATA_BYTES
         log_bytes("tx", "phone", payload, len);
 #endif
-        if (rfcomm_send(payload, len) != 0) {
-            emit_error(BROKER_ERR_RFCOMM);
+        if (s_tx_pend_len != 0) {
+            /* Keep at most one outstanding chunk; a second write while congested is a stream fail. */
+            fail_rfcomm_stream(BROKER_ERR_RFCOMM);
+            break;
         }
+        if (rfcomm_send(payload, len) == 0) {
+            break;
+        }
+        if (rfcomm_is_congested() && len <= sizeof(s_tx_pend)) {
+            memcpy(s_tx_pend, payload, len);
+            s_tx_pend_len = len;
+            s_tx_tries = 0;
+            break;
+        }
+        fail_rfcomm_stream(BROKER_ERR_RFCOMM);
         break;
     default:
         emit_error(BROKER_ERR_FRAME);
@@ -485,8 +594,11 @@ static void take_fragment(BrokerFrag *frag, const uint8_t *data, uint16_t len)
 
 void broker_runtime_init(void)
 {
-    if (s_q == nullptr) {
-        s_q = xQueueCreate(12, sizeof(Msg));
+    if (s_ctrl_q == nullptr) {
+        s_ctrl_q = xQueueCreate(16, sizeof(Msg));
+    }
+    if (s_phone_q == nullptr) {
+        s_phone_q = xQueueCreate(24, sizeof(Msg));
     }
     broker_frag_reset(&s_cmd_frag);
     broker_frag_reset(&s_data_frag);
@@ -512,15 +624,18 @@ void broker_ble_down(void)
     }
 }
 
-int broker_post(uint8_t kind, const uint8_t *data, uint16_t len, const uint8_t bda[6], uint8_t extra)
+int broker_post(uint8_t kind, const uint8_t *data, uint16_t len, const uint8_t bda[6],
+                uint8_t extra, uint32_t gen)
 {
     Msg msg;
-    if (s_q == nullptr) {
+    QueueHandle_t q = (kind == MSG_PHONE_RX) ? s_phone_q : s_ctrl_q;
+    if (q == nullptr) {
         return -1;
     }
     memset(&msg, 0, sizeof(msg));
     msg.kind = kind;
     msg.extra = extra;
+    msg.gen = gen;
     if (len > BROKER_ATT_CHUNK) {
         len = BROKER_ATT_CHUNK;
     }
@@ -531,7 +646,7 @@ int broker_post(uint8_t kind, const uint8_t *data, uint16_t len, const uint8_t b
     if (bda != nullptr) {
         memcpy(msg.bda, bda, 6);
     }
-    if (xQueueSend(s_q, &msg, 0) != pdTRUE) {
+    if (xQueueSend(q, &msg, 0) != pdTRUE) {
         s_dropped++;
         return -1;
     }
@@ -555,6 +670,9 @@ static void on_msg(const Msg *msg)
         take_fragment(&s_data_frag, msg->data, msg->len);
         break;
     case MSG_PHONE_RX:
+        if (msg->gen != 0 && msg->gen != s_rfcomm_gen) {
+            break;
+        }
 #if BROKER_LOG_DATA_BYTES
         log_bytes("rx", "phone", msg->data, msg->len);
 #endif
@@ -572,6 +690,10 @@ static void on_msg(const Msg *msg)
         }
         break;
     case MSG_RFCOMM_OPEN:
+        s_rfcomm_gen = msg->gen != 0 ? msg->gen : s_rfcomm_gen + 1;
+        s_rx_pend_len = 0;
+        s_tx_pend_len = 0;
+        s_tx_tries = 0;
         hfp_hf_remember(msg->bda);
         /* 헤드유닛이 크레딧을 채우기 전에 오는 첫 응답을 버리지 않도록 조금 열어 둔다. */
         if (s_aa) {
@@ -581,7 +703,18 @@ static void on_msg(const Msg *msg)
         emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
         break;
     case MSG_RFCOMM_CLOSE:
+        if (msg->gen != 0 && msg->gen != s_rfcomm_gen) {
+            break;
+        }
+        s_rx_pend_len = 0;
+        s_tx_pend_len = 0;
         emit(EVT_RFCOMM_CLOSE, BROKER_CH_CONTROL, &msg->extra, 1, 0);
+        break;
+    case MSG_RFCOMM_FAIL:
+        if (msg->gen != 0 && msg->gen != s_rfcomm_gen) {
+            break;
+        }
+        fail_rfcomm_stream(msg->extra != 0 ? msg->extra : BROKER_ERR_OVERFLOW);
         break;
     case MSG_SPP_READY:
         s_bt_ready = 1;
@@ -645,12 +778,22 @@ void broker_poll(void)
         }
         s_projection = 0;
         s_credit = 0;
+        s_rx_pend_len = 0;
+        s_tx_pend_len = 0;
         s_aa = 0;
     }
     announce_bt_ready(1);
-    while (budget-- > 0 && s_q != nullptr && xQueueReceive(s_q, &msg, 0) == pdTRUE) {
+    /* Control first so credits and connection events are not starved by phone RX. */
+    while (budget > 0 && s_ctrl_q != nullptr && xQueueReceive(s_ctrl_q, &msg, 0) == pdTRUE) {
         on_msg(&msg);
+        budget--;
     }
+    while (budget > 0 && s_phone_q != nullptr && xQueueReceive(s_phone_q, &msg, 0) == pdTRUE) {
+        on_msg(&msg);
+        budget--;
+    }
+    flush_phone_pending();
+    flush_tx_pending();
 }
 
 void broker_self_check(void)
