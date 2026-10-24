@@ -2,9 +2,13 @@
 
 #include <stdint.h>
 
-/* Project 5 wire contract. Like FYT BLINK/DUDUAUTO: ESP32 owns Classic RFCOMM/HFP,
+/* Project 5 wire contract. Like FYT BLINK/DUDUAUTO: ESP32 owns Classic RFCOMM,
  * and relays phone Android Auto bytes to the head unit over BLE. The head unit owns
  * WPP framing; ESP32 does not decode Android Auto.
+ *
+ * apply_spp policy: no HFP. Pairing is Classic bond only; Android Auto starts when the
+ * phone opens the AA RFCOMM UUID. CMD_AA_ENABLE arms the RFCOMM relay (and may open a
+ * short discoverable window); it does not connect hands-free.
  *
  * Logical frame (little-endian), 12-byte header + payload:
  *   0..1  magic 0xA5 0x5A

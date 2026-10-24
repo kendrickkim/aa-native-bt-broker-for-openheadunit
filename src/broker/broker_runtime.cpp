@@ -42,8 +42,8 @@ static const FrameLabel k_labels[] = {
     {CMD_PROJECTION_UP, "PROJECTION_UP", nullptr},
     {EVT_HELLO_ACK, "HELLO_ACK", "hello ack to head unit"},
     {EVT_BT_READY, "BT_READY", "classic bluetooth is ready"},
-    {EVT_PHONE_LINK, "PHONE_LINK", "phone address and HFP state"},
-    {EVT_HFP_STATE, "HFP_STATE", "hands-free link state"},
+    {EVT_PHONE_LINK, "PHONE_LINK", "phone address (bonded; apply_spp has no HFP)"},
+    {EVT_HFP_STATE, "HFP_STATE", "unused on apply_spp"},
     {EVT_RFCOMM_OPEN, "RFCOMM_OPEN", "phone Android Auto channel opened"},
     {EVT_RFCOMM_CLOSE, "RFCOMM_CLOSE", "phone Android Auto channel closed"},
     {EVT_ERROR, "ERROR", "broker error"},
@@ -499,9 +499,13 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         remember_network(payload, len);
         break;
     case CMD_AA_ENABLE:
-        /* BLINK와 같이 WPP는 헤드유닛이 한다. 여기서는 HFP와 RFCOMM 중계만 켠다. */
+        /* apply_spp: WPP는 헤드유닛, 여기서는 RFCOMM 중계만. HFP는 쓰지 않는다. */
         s_aa = 1;
-        hfp_hf_connect_bonded();
+        /* Brief discoverable window so the phone can find the AA SDP/RFCOMM service. */
+        if (s_bond_until == 0) {
+            s_bond_until = millis() + 60000UL;
+            rfcomm_set_discoverable(1);
+        }
         if (rfcomm_is_open()) {
             /* 이미 열린 채널이면 헤드유닛이 핸드셰이크를 시작할 수 있게 다시 알린다. */
             emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
@@ -724,21 +728,16 @@ static void on_msg(const Msg *msg)
         }
         rfcomm_set_discoverable(s_bond_until != 0);
         announce_bt_ready(1);
-        /* 헤드유닛의 AA_ENABLE을 기다리지 않는다. 전원이 들어오면 마지막 폰을 부른다. */
-        s_reconnect_until = millis() + 60000UL;
-        s_reconnect_next = millis() + 5000UL;
-        hfp_hf_connect_last();
+        /* apply_spp: no HFP reconnect — phone must open AA RFCOMM on its own / via SDP. */
         break;
     case MSG_PAIRED:
         s_paired = 1;
         hfp_hf_remember(msg->bda);
-        if (s_aa) {
-            hfp_hf_connect(msg->bda);
-        }
         if (s_pairing) {
             leave_pairing();
         }
-        emit_phone_link(msg->bda, hfp_hf_state());
+        /* Phone link evidence without HFP SLC (state 0). */
+        emit_phone_link(msg->bda, 0);
         break;
     default:
         break;
@@ -750,7 +749,7 @@ void broker_poll(void)
     Msg msg;
     int budget = 8;
     poll_pair_button();
-    if (s_pairing && (rfcomm_is_open() || hfp_hf_is_up())) {
+    if (s_pairing && rfcomm_is_open()) {
         leave_pairing();
     }
     if (s_bond_until != 0 && (int32_t)(millis() - s_bond_until) >= 0) {
@@ -761,15 +760,7 @@ void broker_poll(void)
             rfcomm_set_discoverable(0);
         }
     }
-    if (s_reconnect_until != 0) {
-        if (rfcomm_is_open() || hfp_hf_is_up() ||
-            (int32_t)(millis() - s_reconnect_until) >= 0) {
-            s_reconnect_until = 0;
-        } else if (hfp_hf_state() == 0 && (int32_t)(millis() - s_reconnect_next) >= 0) {
-            s_reconnect_next = millis() + 5000UL;
-            hfp_hf_connect_last();
-        }
-    }
+    /* apply_spp: s_reconnect_* unused — HFP wake loop removed. */
     if (!s_ble_up && s_ble_down_at != 0 && (int32_t)(millis() - s_ble_down_at) >= 10000) {
         s_ble_down_at = 0;
         if (rfcomm_is_open()) {

@@ -3,7 +3,6 @@
 #include "aa_sdp.h"
 #include "protocol/broker_protocol.h"
 #include "broker/broker_runtime.h"
-#include "hfp_hf.h"
 
 #include <Arduino.h>
 
@@ -154,9 +153,10 @@ void rfcomm_bridge_init(void)
     esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
     esp_bt_cod_t cod = {};
     esp_spp_cfg_t spp_cfg = {};
+    /* apply_spp: advertise as an AV accessory with AA RFCOMM, not a telephony HF device. */
     cod.major = ESP_BT_COD_MAJOR_DEV_AV;
     cod.minor = 0x08;
-    cod.service = ESP_BT_COD_SRVC_AUDIO | ESP_BT_COD_SRVC_TELEPHONY;
+    cod.service = ESP_BT_COD_SRVC_AUDIO;
     spp_cfg.mode = ESP_SPP_MODE_CB;
 
     if (!btStart()) {
@@ -176,7 +176,7 @@ void rfcomm_bridge_init(void)
     esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
     esp_bt_gap_set_pin(ESP_BT_PIN_TYPE_VARIABLE, 4, pin);
 
-    hfp_hf_init();
+    /* apply_spp: do not register HFP — wake and transport are RFCOMM/SPP only. */
 
     if (esp_spp_register_callback(spp_cb) != ESP_OK) {
         Serial.println("SPP callback register failed");
