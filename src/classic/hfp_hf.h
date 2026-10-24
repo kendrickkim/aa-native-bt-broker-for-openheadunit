@@ -14,6 +14,11 @@ void hfp_hf_remember(const uint8_t bda[6]);
 void hfp_hf_connect_last(void);
 /** 저장된 마지막 폰 주소를 지운다. */
 void hfp_hf_forget_last(void);
+/**
+ * 활성 HFP SLC를 끊는다. Android Auto 기동(wake) 뒤 통화 라우팅을 폰/다른 장치로
+ * 되돌릴 때 쓴다. SCO 오디오는 원래 중계하지 않는다.
+ */
+void hfp_hf_disconnect(void);
 /** 마지막 HFP 연결 상태 값. */
 uint8_t hfp_hf_state(void);
 /** HFP가 붙어 있거나 서비스 레벨까지 올라왔으면 1. */

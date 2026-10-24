@@ -13,6 +13,8 @@ static const char *NVS_NS = "broker";
 static const char *NVS_LAST = "lastbda";
 
 static uint8_t s_state;
+static uint8_t s_peer[6];
+static int s_peer_valid;
 
 /** SCO 음성은 브로커가 중계하지 않는다. 콜백만 등록해 둔다. */
 static void hf_recv(const uint8_t *buf, uint32_t len)
@@ -35,6 +37,13 @@ static void hf_cb(esp_hf_client_cb_event_t event, esp_hf_client_cb_param_t *para
     if (event == ESP_HF_CLIENT_CONNECTION_STATE_EVT && param != nullptr) {
         s_state = (uint8_t)param->conn_stat.state;
         Serial.printf("HFP HF state %u\n", s_state);
+        if (s_state == ESP_HF_CLIENT_CONNECTION_STATE_CONNECTED ||
+            s_state == ESP_HF_CLIENT_CONNECTION_STATE_SLC_CONNECTED) {
+            memcpy(s_peer, param->conn_stat.remote_bda, 6);
+            s_peer_valid = 1;
+        } else if (s_state == ESP_HF_CLIENT_CONNECTION_STATE_DISCONNECTED) {
+            s_peer_valid = 0;
+        }
         broker_post(MSG_HFP, nullptr, 0, param->conn_stat.remote_bda, s_state, 0);
     } else if (event == ESP_HF_CLIENT_AUDIO_STATE_EVT && param != nullptr) {
         Serial.printf("HFP audio state %u\n", (unsigned)param->audio_stat.state);
@@ -161,6 +170,26 @@ void hfp_hf_connect_bonded(void)
     for (int i = 0; i < count; i++) {
         hfp_hf_connect(list[i]);
     }
+}
+
+void hfp_hf_disconnect(void)
+{
+    uint8_t bda[6];
+    if (s_peer_valid) {
+        memcpy(bda, s_peer, 6);
+    } else {
+        Preferences prefs;
+        prefs.begin(NVS_NS, true);
+        size_t n = prefs.getBytes(NVS_LAST, bda, sizeof(bda));
+        prefs.end();
+        if (n != sizeof(bda)) {
+            Serial.println("HFP disconnect: no peer");
+            return;
+        }
+    }
+    Serial.printf("HFP disconnect %02X:%02X:%02X:%02X:%02X:%02X\n",
+                  bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
+    esp_hf_client_disconnect(bda);
 }
 
 uint8_t hfp_hf_state(void)

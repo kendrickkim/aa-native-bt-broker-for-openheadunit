@@ -94,6 +94,24 @@ static const uint8_t CREDIT_CAP = 8;
 static int s_projection;
 /** Active RFCOMM connection generation from MSG_RFCOMM_OPEN. */
 static uint32_t s_rfcomm_gen;
+/**
+ * apply_hfp: after Android Auto is up, HFP is released so the phone is not stuck on a
+ * silent hands-free device. While suppressed, boot/reconnect must not call HFP again
+ * until the head unit sends CMD_AA_ENABLE.
+ */
+static int s_hfp_suppressed;
+/** Non-zero: millis deadline to release HFP after RFCOMM_OPEN if projection is slow. */
+static uint32_t s_hfp_release_at;
+static const uint32_t HFP_RELEASE_AFTER_RFCOMM_MS = 8000;
+
+static void release_hfp_after_aa(const char *why)
+{
+    Serial.printf("releasing HFP after AA (%s)\n", why ? why : "");
+    s_hfp_release_at = 0;
+    s_hfp_suppressed = 1;
+    s_reconnect_until = 0;
+    hfp_hf_disconnect();
+}
 
 /** Bytes waiting for credit / BLE indicate room. */
 #define RX_PEND_CAP (BROKER_ATT_CHUNK * 8)
@@ -392,6 +410,9 @@ static void prepare_new_phone(void)
     s_paired = 0;
     s_reconnect_until = 0;
     s_reconnect_next = 0;
+    s_hfp_release_at = 0;
+    s_hfp_suppressed = 0;
+    hfp_hf_disconnect();
     rfcomm_disconnect();
     s_projection = 0;
     s_credit = 0;
@@ -499,12 +520,15 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         remember_network(payload, len);
         break;
     case CMD_AA_ENABLE:
-        /* BLINK와 같이 WPP는 헤드유닛이 한다. 여기서는 HFP와 RFCOMM 중계만 켠다. */
+        /* BLINK와 같이 WPP는 헤드유닛이 한다. HFP는 wake용으로만 잠시 붙인다. */
         s_aa = 1;
+        s_hfp_suppressed = 0;
+        s_hfp_release_at = 0;
         hfp_hf_connect_bonded();
         if (rfcomm_is_open()) {
             /* 이미 열린 채널이면 헤드유닛이 핸드셰이크를 시작할 수 있게 다시 알린다. */
             emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
+            s_hfp_release_at = millis() + HFP_RELEASE_AFTER_RFCOMM_MS;
         }
         emit_status();
         break;
@@ -512,10 +536,18 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         s_aa = 0;
         s_credit = 0;
         s_rx_pend_len = 0;
+        s_hfp_release_at = 0;
+        /* Keep suppressed until the next AA_ENABLE so we do not steal call audio again. */
+        s_hfp_suppressed = 1;
+        hfp_hf_disconnect();
         emit_status();
         break;
     case CMD_PROJECTION_UP:
         s_projection = len > 0 && payload != nullptr && payload[0] != 0;
+        if (s_projection) {
+            /* Wi-Fi projection is up — HFP wake is done; return call routing to the phone. */
+            release_hfp_after_aa("projection up");
+        }
         emit_status();
         break;
     case CMD_GET_STATUS:
@@ -701,6 +733,12 @@ static void on_msg(const Msg *msg)
         }
         /* BLINK의 AA: 채널이 열리면 헤드유닛이 먼저 말한다. */
         emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
+        if (s_projection) {
+            release_hfp_after_aa("rfcomm open while projection up");
+        } else {
+            /* Fallback if PROJECTION_UP is late or missing. */
+            s_hfp_release_at = millis() + HFP_RELEASE_AFTER_RFCOMM_MS;
+        }
         break;
     case MSG_RFCOMM_CLOSE:
         if (msg->gen != 0 && msg->gen != s_rfcomm_gen) {
@@ -724,15 +762,17 @@ static void on_msg(const Msg *msg)
         }
         rfcomm_set_discoverable(s_bond_until != 0);
         announce_bt_ready(1);
-        /* 헤드유닛의 AA_ENABLE을 기다리지 않는다. 전원이 들어오면 마지막 폰을 부른다. */
-        s_reconnect_until = millis() + 60000UL;
-        s_reconnect_next = millis() + 5000UL;
-        hfp_hf_connect_last();
+        /* Boot wake: HFP to the last phone unless a previous AA session already released it. */
+        if (!s_hfp_suppressed) {
+            s_reconnect_until = millis() + 60000UL;
+            s_reconnect_next = millis() + 5000UL;
+            hfp_hf_connect_last();
+        }
         break;
     case MSG_PAIRED:
         s_paired = 1;
         hfp_hf_remember(msg->bda);
-        if (s_aa) {
+        if (s_aa && !s_hfp_suppressed) {
             hfp_hf_connect(msg->bda);
         }
         if (s_pairing) {
@@ -761,7 +801,10 @@ void broker_poll(void)
             rfcomm_set_discoverable(0);
         }
     }
-    if (s_reconnect_until != 0) {
+    if (s_hfp_release_at != 0 && (int32_t)(millis() - s_hfp_release_at) >= 0) {
+        release_hfp_after_aa("rfcomm open timeout");
+    }
+    if (s_reconnect_until != 0 && !s_hfp_suppressed && !s_projection) {
         if (rfcomm_is_open() || hfp_hf_is_up() ||
             (int32_t)(millis() - s_reconnect_until) >= 0) {
             s_reconnect_until = 0;
@@ -781,6 +824,9 @@ void broker_poll(void)
         s_rx_pend_len = 0;
         s_tx_pend_len = 0;
         s_aa = 0;
+        s_hfp_release_at = 0;
+        s_hfp_suppressed = 1;
+        hfp_hf_disconnect();
     }
     announce_bt_ready(1);
     /* Control first so credits and connection events are not starved by phone RX. */
