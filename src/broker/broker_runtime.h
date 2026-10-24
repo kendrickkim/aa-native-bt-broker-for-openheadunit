@@ -10,6 +10,8 @@
 #define MSG_RFCOMM_CLOSE 6
 #define MSG_SPP_READY 7
 #define MSG_PAIRED 8
+/** Phone RX queue overflow or RFCOMM write failure — fail the active stream. */
+#define MSG_RFCOMM_FAIL 9
 
 /** 큐와 BLE 조각 버퍼를 준비한다. */
 void broker_runtime_init(void);
@@ -21,5 +23,9 @@ void broker_self_check(void);
 void broker_ble_up(void);
 /** BLE가 끊기면 조각 버퍼를 버리고, 이후 재연결 대기를 시작한다. */
 void broker_ble_down(void);
-/** 블루투스 콜백에서 받은 이벤트를 루프 큐에 넣는다. 큐가 가득 차면 -1. */
-int broker_post(uint8_t kind, const uint8_t *data, uint16_t len, const uint8_t bda[6], uint8_t extra);
+/**
+ * 블루투스 콜백에서 받은 이벤트를 루프 큐에 넣는다. 큐가 가득 차면 -1.
+ * [gen]은 RFCOMM 연결 세대. 제어 이벤트는 0을 쓴다.
+ */
+int broker_post(uint8_t kind, const uint8_t *data, uint16_t len, const uint8_t bda[6],
+                uint8_t extra, uint32_t gen);
