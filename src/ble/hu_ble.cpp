@@ -10,11 +10,42 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 
+static BLEServer *s_server;
 static BLECharacteristic *s_evt;
 static BLECharacteristic *s_data_tx;
 static bool s_evt_on;
 static bool s_data_on;
 static uint16_t s_mtu = 23;
+static int s_connected;
+/** onDisconnect에서 바로 startAdvertising 하면 다음 연결이 MTU 뒤에서 멈출 수 있다. */
+static int s_advertise_pending;
+static uint32_t s_advertise_at;
+static uint32_t s_connected_at;
+/** 이 연결에서 헤드유닛 GATT write를 한 번이라도 받았으면 1. */
+static int s_got_hu_write;
+
+static const uint32_t ADVERTISE_DELAY_MS = 500;
+/** 연결·MTU 이후에도 HELLO 등 write가 없으면 GATT가 죽은 것으로 보고 끊는다. */
+static const uint32_t STALL_MS = 8000;
+
+static void request_advertise(uint32_t delay_ms)
+{
+    s_advertise_pending = 1;
+    s_advertise_at = millis() + delay_ms;
+}
+
+static void force_ble_disconnect(const char *why)
+{
+    Serial.printf("BLE: forcing disconnect (%s)\n", why ? why : "");
+    s_evt_on = false;
+    s_data_on = false;
+    s_mtu = 23;
+    s_got_hu_write = 0;
+    s_connected_at = 0;
+    if (s_server != nullptr && s_connected) {
+        s_server->disconnect(s_server->getConnId());
+    }
+}
 
 /** Just Works 본딩. 입출력 장치가 없으므로 PIN은 확인만 한다. */
 class BrokerSecurity : public BLESecurityCallbacks {
@@ -32,11 +63,17 @@ class BrokerSecurity : public BLESecurityCallbacks {
     }
 };
 
-/** 연결과 MTU를 기록하고, 끊기면 광고를 다시 시작한다. */
+/** 연결과 MTU를 기록하고, 끊기면 광고를 지연 재시작한다. */
 class BrokerServerCallbacks : public BLEServerCallbacks {
     void onConnect(BLEServer *server) override
     {
         (void)server;
+        s_connected = 1;
+        s_advertise_pending = 0;
+        s_got_hu_write = 0;
+        s_connected_at = millis();
+        s_mtu = 23;
+        BLEDevice::getAdvertising()->stop();
         broker_ble_up();
         Serial.println("head unit BLE connected");
     }
@@ -44,12 +81,17 @@ class BrokerServerCallbacks : public BLEServerCallbacks {
     void onDisconnect(BLEServer *server) override
     {
         (void)server;
+        s_connected = 0;
         s_evt_on = false;
         s_data_on = false;
         s_mtu = 23;
+        s_got_hu_write = 0;
+        s_connected_at = 0;
         broker_ble_down();
         Serial.println("head unit BLE disconnected");
-        BLEDevice::startAdvertising();
+        // 스택이 연결을 정리할 시간을 준 뒤 광고. 콜백에서 바로 start하면
+        // 재접속 후 MTU만 되고 서비스 탐색/쓰기가 멈출 수 있다.
+        request_advertise(ADVERTISE_DELAY_MS);
     }
 
     void onMtuChanged(BLEServer *server, esp_ble_gatts_cb_param_t *param) override
@@ -72,6 +114,7 @@ public:
         const uint8_t *data = characteristic->getData();
         size_t len = characteristic->getLength();
         if (data != nullptr && len > 0 && len <= BROKER_ATT_CHUNK) {
+            s_got_hu_write = 1;
             broker_post(kind, data, (uint16_t)len, nullptr, 0, 0);
         }
     }
@@ -87,6 +130,9 @@ public:
         uint8_t *value = descriptor->getValue();
         /* bit0 = notify, bit1 = indicate. 헤드유닛은 indicate를 켠다. */
         *flag = value != nullptr && ((value[0] & 0x01) || (value[0] & 0x02));
+        if (*flag) {
+            s_got_hu_write = 1;
+        }
     }
 };
 
@@ -111,9 +157,9 @@ void hu_ble_start(void)
     security.setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
     security.setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
-    BLEServer *server = BLEDevice::createServer();
-    server->setCallbacks(new BrokerServerCallbacks());
-    BLEService *service = server->createService(BROKER_BLE_SERVICE);
+    s_server = BLEDevice::createServer();
+    s_server->setCallbacks(new BrokerServerCallbacks());
+    BLEService *service = s_server->createService(BROKER_BLE_SERVICE);
 
     BLECharacteristic *cmd = service->createCharacteristic(
         BROKER_BLE_CMD_RX, BLECharacteristic::PROPERTY_WRITE);
@@ -133,6 +179,23 @@ void hu_ble_start(void)
     advertising->addServiceUUID(BROKER_BLE_SERVICE);
     advertising->start();
     Serial.println("advertising OpenHU-NativeBTBroker-Setter");
+}
+
+void hu_ble_poll(void)
+{
+    if (s_advertise_pending && !s_connected &&
+        (int32_t)(millis() - s_advertise_at) >= 0) {
+        s_advertise_pending = 0;
+        BLEDevice::startAdvertising();
+        Serial.println("BLE advertising restarted");
+    }
+
+    /* 재접속 후 MTU까지만 되고 HELLO/CCCD가 안 오는 ESP GATT 교착 복구. */
+    if (s_connected && !s_got_hu_write && s_connected_at != 0 &&
+        (int32_t)(millis() - s_connected_at) >= (int32_t)STALL_MS) {
+        force_ble_disconnect("no HU GATT traffic after connect");
+        /* onDisconnect가 광고를 예약한다. */
+    }
 }
 
 uint16_t hu_ble_mtu(void)

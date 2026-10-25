@@ -839,6 +839,7 @@ void broker_poll(void)
 {
     Msg msg;
     int budget = 8;
+    hu_ble_poll();
     poll_pair_button();
     if (s_pairing && (rfcomm_is_open() || hfp_hf_is_up())) {
         leave_pairing();
