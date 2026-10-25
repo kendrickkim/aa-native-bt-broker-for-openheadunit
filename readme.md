@@ -107,8 +107,8 @@ For a release package, after `pio run` collect `bootloader.bin`, `partitions.bin
 
 1. After boot, once the classic stack is ready, the board stays discoverable for about 180 seconds. The head unit’s bonding command can reopen that window.
 2. When the head unit connects over BLE and sends `CMD_HELLO`, it gets `EVT_HELLO_ACK` and, if the stack is ready, `EVT_BT_READY`.
-3. `CMD_AA_ENABLE` starts HFP to the bonded phone. (`CMD_SET_NETWORK` is optional; WPP is sent by the head unit.)
-4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first.
+3. HFP is off at boot. It is armed only for a new-phone pairing window or for `CMD_HFP_ON` / main-compat `CMD_AA_ENABLE`. Phone-initiated HFP while suppressed is refused. (`CMD_SET_NETWORK` is optional; WPP is sent by the head unit.)
+4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first. `CMD_HFP_OFF` drops HFP; `CMD_PROJECTION_UP` is status only.
 5. Phone → `DATA_RFCOMM_RX` (≈ ZB) indicate; head unit → `DATA_RFCOMM_TX` (≈ AT#ZA) write.
 6. The head unit tops up RX credit with `EVT_CREDIT`. Without credit, phone bytes are dropped.
 7. If head-unit BLE stays down for 10 seconds, phone RFCOMM is closed and the relay is torn down.

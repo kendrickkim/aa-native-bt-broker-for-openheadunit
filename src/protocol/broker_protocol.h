@@ -6,9 +6,10 @@
  * and relays phone Android Auto bytes to the head unit over BLE. The head unit owns
  * WPP framing; ESP32 does not decode Android Auto.
  *
- * apply_hfp policy: HFP is a wake only. CMD_AA_ENABLE connects HFP; CMD_PROJECTION_UP
- * (or a short timeout after EVT_RFCOMM_OPEN) disconnects HFP so the phone is not left
- * on a silent hands-free device. Pairing (CMD_SET_BOND_MODE) is separate from HFP SLC.
+ * HFP is off at boot. It is armed only for a new-phone pairing window or for
+ * CMD_HFP_ON / main-compat CMD_AA_ENABLE. Phone-initiated HFP while suppressed
+ * is refused. After HFP_ON/OFF has been seen, CMD_AA_ENABLE does not touch HFP.
+ * CMD_PROJECTION_UP is status only (main).
  *
  * Logical frame (little-endian), 12-byte header + payload:
  *   0..1  magic 0xA5 0x5A
@@ -60,6 +61,8 @@
 #define CMD_GET_STATUS 0x05
 #define CMD_SET_BOND_MODE 0x06
 #define CMD_PROJECTION_UP 0x07
+#define CMD_HFP_ON 0x08
+#define CMD_HFP_OFF 0x09
 
 /* CMD_SET_BOND_MODE payload:
  *   u8 mode: 0 = close pairing window,

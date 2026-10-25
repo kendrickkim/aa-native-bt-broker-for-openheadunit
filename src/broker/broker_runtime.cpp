@@ -40,6 +40,8 @@ static const FrameLabel k_labels[] = {
     {CMD_GET_STATUS, "GET_STATUS", nullptr},
     {CMD_SET_BOND_MODE, "SET_BOND_MODE", nullptr},
     {CMD_PROJECTION_UP, "PROJECTION_UP", nullptr},
+    {CMD_HFP_ON, "HFP_ON", nullptr},
+    {CMD_HFP_OFF, "HFP_OFF", nullptr},
     {EVT_HELLO_ACK, "HELLO_ACK", "hello ack to head unit"},
     {EVT_BT_READY, "BT_READY", "classic bluetooth is ready"},
     {EVT_PHONE_LINK, "PHONE_LINK", "phone address and HFP state"},
@@ -95,22 +97,53 @@ static int s_projection;
 /** Active RFCOMM connection generation from MSG_RFCOMM_OPEN. */
 static uint32_t s_rfcomm_gen;
 /**
- * apply_hfp: after Android Auto is up, HFP is released so the phone is not stuck on a
- * silent hands-free device. While suppressed, boot/reconnect must not call HFP again
- * until the head unit sends CMD_AA_ENABLE.
+ * HFP stays off from boot. It is armed only for:
+ *   - new-phone pairing window (inbound SLC allowed), or
+ *   - CMD_HFP_ON / main-compat CMD_AA_ENABLE (outbound to bonded phone).
+ * While suppressed, any phone-initiated HFP is refused immediately.
  */
-static int s_hfp_suppressed;
-/** Non-zero: millis deadline to release HFP after RFCOMM_OPEN if projection is slow. */
+static int s_hfp_suppressed = 1;
+/** Non-zero once this BLE session has received CMD_HFP_ON or CMD_HFP_OFF. */
+static int s_hfp_cmd_used;
+/** Non-zero: millis deadline unused on apply_hfp once HU owns HFP_OFF. */
 static uint32_t s_hfp_release_at;
-static const uint32_t HFP_RELEASE_AFTER_RFCOMM_MS = 8000;
 
-static void release_hfp_after_aa(const char *why)
+static void apply_hfp_off(const char *why)
 {
-    Serial.printf("releasing HFP after AA (%s)\n", why ? why : "");
     s_hfp_release_at = 0;
     s_hfp_suppressed = 1;
     s_reconnect_until = 0;
+    if (!hfp_hf_is_up()) {
+        return;
+    }
+    Serial.printf("HFP off (%s)\n", why ? why : "CMD_HFP_OFF");
     hfp_hf_disconnect();
+}
+
+/** Allow inbound HFP (pairing) and/or dial bonded phones (AA wake). */
+static void apply_hfp_on(const char *why)
+{
+    if (s_projection) {
+        Serial.printf("HFP on ignored (projection up, %s)\n", why ? why : "");
+        return;
+    }
+    s_hfp_suppressed = 0;
+    s_hfp_release_at = 0;
+    s_reconnect_until = 0;
+    Serial.printf("HFP on (%s)\n", why ? why : "CMD_HFP_ON");
+    hfp_hf_connect_bonded();
+}
+
+/** Pairing window: accept inbound HFP, do not dial old bonds. */
+static void arm_hfp_for_pairing(void)
+{
+    if (s_projection) {
+        return;
+    }
+    s_hfp_suppressed = 0;
+    s_hfp_release_at = 0;
+    s_reconnect_until = 0;
+    Serial.println("HFP armed for pairing (inbound only)");
 }
 
 /** Bytes waiting for credit / BLE indicate room. */
@@ -411,7 +444,8 @@ static void prepare_new_phone(void)
     s_reconnect_until = 0;
     s_reconnect_next = 0;
     s_hfp_release_at = 0;
-    s_hfp_suppressed = 0;
+    s_hfp_suppressed = 1;
+    s_hfp_cmd_used = 0;
     hfp_hf_disconnect();
     rfcomm_disconnect();
     s_projection = 0;
@@ -431,6 +465,7 @@ static void enter_pairing(uint16_t seconds)
     }
     s_bond_until = millis() + (uint32_t)seconds * 1000UL;
     s_pairing = 1;
+    arm_hfp_for_pairing();
     rfcomm_set_discoverable(1);
     Serial.printf("pairing mode for %u s\n", seconds);
 }
@@ -438,11 +473,16 @@ static void enter_pairing(uint16_t seconds)
 /** 페어링 창을 닫고 LED를 끈다. */
 static void leave_pairing(void)
 {
+    const int was = s_pairing;
     s_bond_until = 0;
     s_pairing = 0;
     digitalWrite(PIN_LED, LOW);
     rfcomm_set_discoverable(0);
     Serial.println("pairing mode ended");
+    /* Window closed with no AA arming and no live HFP — back to boot-idle off. */
+    if (was && !s_aa && !hfp_hf_is_up()) {
+        apply_hfp_off("pairing window closed");
+    }
 }
 
 /** GPIO0이 5초 이상 눌리면 페어링 창을 연다. 창이 열려 있는 동안 GPIO2를 깜빡인다. */
@@ -520,34 +560,43 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         remember_network(payload, len);
         break;
     case CMD_AA_ENABLE:
-        /* BLINK와 같이 WPP는 헤드유닛이 한다. HFP는 wake용으로만 잠시 붙인다. */
+        /* main: enable RFCOMM relay. HFP only if this HU never sent HFP_ON/OFF. */
         s_aa = 1;
-        s_hfp_suppressed = 0;
-        s_hfp_release_at = 0;
-        hfp_hf_connect_bonded();
+        if (!s_hfp_cmd_used && !s_projection) {
+            apply_hfp_on("AA_ENABLE (main compat)");
+        } else if (s_hfp_cmd_used) {
+            Serial.println("AA_ENABLE: RFCOMM relay only (HFP_ON/OFF owns HFP)");
+        }
         if (rfcomm_is_open()) {
-            /* 이미 열린 채널이면 헤드유닛이 핸드셰이크를 시작할 수 있게 다시 알린다. */
             emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
-            s_hfp_release_at = millis() + HFP_RELEASE_AFTER_RFCOMM_MS;
         }
         emit_status();
         break;
     case CMD_AA_DISABLE:
+        /* main: tear down the relay only. HFP is left to HFP_OFF or the main AA_ENABLE pairing. */
         s_aa = 0;
         s_credit = 0;
         s_rx_pend_len = 0;
-        s_hfp_release_at = 0;
-        /* Keep suppressed until the next AA_ENABLE so we do not steal call audio again. */
-        s_hfp_suppressed = 1;
-        hfp_hf_disconnect();
         emit_status();
         break;
-    case CMD_PROJECTION_UP:
-        s_projection = len > 0 && payload != nullptr && payload[0] != 0;
-        if (s_projection) {
-            /* Wi-Fi projection is up — HFP wake is done; return call routing to the phone. */
-            release_hfp_after_aa("projection up");
+    case CMD_PROJECTION_UP: {
+        /* main: status only. apply_hfp HU sends CMD_HFP_OFF on the rising edge. */
+        const uint8_t up = (len > 0 && payload != nullptr && payload[0] != 0) ? 1 : 0;
+        const uint8_t was = s_projection;
+        s_projection = up;
+        if (was != up) {
+            emit_status();
         }
+        break;
+    }
+    case CMD_HFP_ON:
+        s_hfp_cmd_used = 1;
+        apply_hfp_on("CMD_HFP_ON");
+        emit_status();
+        break;
+    case CMD_HFP_OFF:
+        s_hfp_cmd_used = 1;
+        apply_hfp_off("CMD_HFP_OFF");
         emit_status();
         break;
     case CMD_GET_STATUS:
@@ -712,6 +761,13 @@ static void on_msg(const Msg *msg)
         forward_phone_rx(msg->data, msg->len);
         break;
     case MSG_HFP:
+        /* Boot/idle: phone must not park calls on this HF device. */
+        if (s_hfp_suppressed && msg->extra >= 1 && msg->extra <= 3) {
+            Serial.printf("HFP refused — not armed (state %u)\n", msg->extra);
+            hfp_hf_disconnect();
+            emit(EVT_HFP_STATE, BROKER_CH_CONTROL, &msg->extra, 1, 0);
+            break;
+        }
         emit(EVT_HFP_STATE, BROKER_CH_CONTROL, &msg->extra, 1, 0);
         if (msg->extra == 2 || msg->extra == 3) {
             hfp_hf_remember(msg->bda);
@@ -733,12 +789,6 @@ static void on_msg(const Msg *msg)
         }
         /* BLINK의 AA: 채널이 열리면 헤드유닛이 먼저 말한다. */
         emit(EVT_RFCOMM_OPEN, BROKER_CH_CONTROL, nullptr, 0, 0);
-        if (s_projection) {
-            release_hfp_after_aa("rfcomm open while projection up");
-        } else {
-            /* Fallback if PROJECTION_UP is late or missing. */
-            s_hfp_release_at = millis() + HFP_RELEASE_AFTER_RFCOMM_MS;
-        }
         break;
     case MSG_RFCOMM_CLOSE:
         if (msg->gen != 0 && msg->gen != s_rfcomm_gen) {
@@ -762,18 +812,18 @@ static void on_msg(const Msg *msg)
         }
         rfcomm_set_discoverable(s_bond_until != 0);
         announce_bt_ready(1);
-        /* Boot wake: HFP to the last phone unless a previous AA session already released it. */
-        if (!s_hfp_suppressed) {
-            s_reconnect_until = millis() + 60000UL;
-            s_reconnect_next = millis() + 5000UL;
-            hfp_hf_connect_last();
+        /* Boot: discoverable for classic pairing inquiry, but HFP stays off. */
+        s_hfp_suppressed = 1;
+        if (hfp_hf_is_up()) {
+            apply_hfp_off("boot");
         }
         break;
     case MSG_PAIRED:
         s_paired = 1;
         hfp_hf_remember(msg->bda);
-        if (s_aa && !s_hfp_suppressed) {
-            hfp_hf_connect(msg->bda);
+        /* main: if AA relay is already on and HU never sent HFP_ON/OFF, start HFP. */
+        if (s_aa && !s_hfp_cmd_used && !s_projection) {
+            apply_hfp_on("paired while AA_ENABLE (main compat)");
         }
         if (s_pairing) {
             leave_pairing();
@@ -801,18 +851,9 @@ void broker_poll(void)
             rfcomm_set_discoverable(0);
         }
     }
-    if (s_hfp_release_at != 0 && (int32_t)(millis() - s_hfp_release_at) >= 0) {
-        release_hfp_after_aa("rfcomm open timeout");
-    }
-    if (s_reconnect_until != 0 && !s_hfp_suppressed && !s_projection) {
-        if (rfcomm_is_open() || hfp_hf_is_up() ||
-            (int32_t)(millis() - s_reconnect_until) >= 0) {
-            s_reconnect_until = 0;
-        } else if (hfp_hf_state() == 0 && (int32_t)(millis() - s_reconnect_next) >= 0) {
-            s_reconnect_next = millis() + 5000UL;
-            hfp_hf_connect_last();
-        }
-    }
+    /* apply_hfp: no autonomous HFP reconnect — only CMD_HFP_ON or main-compat AA_ENABLE. */
+    s_reconnect_until = 0;
+    s_reconnect_next = 0;
     if (!s_ble_up && s_ble_down_at != 0 && (int32_t)(millis() - s_ble_down_at) >= 10000) {
         s_ble_down_at = 0;
         if (rfcomm_is_open()) {
@@ -826,6 +867,7 @@ void broker_poll(void)
         s_aa = 0;
         s_hfp_release_at = 0;
         s_hfp_suppressed = 1;
+        s_hfp_cmd_used = 0;
         hfp_hf_disconnect();
     }
     announce_bt_ready(1);

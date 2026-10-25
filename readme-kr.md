@@ -107,8 +107,8 @@ pio device monitor
 
 1. 부팅 후 클래식 스택이 준비되면 약 180초 동안 검색 가능 상태가 됩니다. 헤드유닛의 본딩 명령으로 이 창을 다시 열 수 있습니다.
 2. 헤드유닛이 BLE로 접속하고 `CMD_HELLO`를 보내면 `EVT_HELLO_ACK`와, 스택이 준비됐다면 `EVT_BT_READY`를 받습니다.
-3. `CMD_AA_ENABLE`을 보내면 본드된 폰에 HFP를 겁니다. (`CMD_SET_NETWORK`는 선택이며 WPP는 헤드유닛이 보냅니다.)
-4. 폰 HFP가 올라오면 `EVT_PHONE_LINK`(≈ JH), Android Auto RFCOMM이 열리면 `EVT_RFCOMM_OPEN`(≈ AA). 이후 헤드유닛이 먼저 WPP를 보냅니다.
+3. 부팅 시 HFP는 꺼져 있습니다. 신규 페어링 창, 또는 `CMD_HFP_ON` / main 호환 `CMD_AA_ENABLE` 전에만 켭니다. 그 외 폰이 먼저 거는 HFP는 거절합니다. (`CMD_SET_NETWORK`는 선택이며 WPP는 헤드유닛이 보냅니다.)
+4. 폰 HFP가 올라오면 `EVT_PHONE_LINK`(≈ JH), Android Auto RFCOMM이 열리면 `EVT_RFCOMM_OPEN`(≈ AA). 이후 헤드유닛이 먼저 WPP를 보냅니다. `CMD_HFP_OFF`로 HFP를 끊고, `CMD_PROJECTION_UP`은 상태만 알립니다.
 5. 폰 → `DATA_RFCOMM_RX`(≈ ZB) indicate, 헤드유닛 → `DATA_RFCOMM_TX`(≈ AT#ZA) write.
 6. 헤드유닛은 `EVT_CREDIT`으로 RX 크레딧을 채웁니다. 크레딧이 없으면 폰 바이트는 버려집니다.
 7. 헤드유닛 BLE가 10초 동안 내려가 있으면 폰 RFCOMM을 끊고 중계를 내립니다.
