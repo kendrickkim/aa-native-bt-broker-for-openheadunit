@@ -170,7 +170,7 @@ void rfcomm_bridge_init(void)
         esp_bluedroid_enable();
     }
 
-    esp_bt_gap_set_device_name("OpenHU-NativeBTBroker");
+    esp_bt_gap_set_device_name("OpenHU-BTBroker");
     esp_bt_gap_set_cod(cod, ESP_BT_INIT_COD);
     esp_bt_gap_register_callback(gap_cb);
     esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
@@ -192,7 +192,7 @@ void rfcomm_set_discoverable(int discoverable)
     esp_bt_connection_mode_t conn = ESP_BT_CONNECTABLE;
     esp_bt_discovery_mode_t disc = discoverable ? ESP_BT_GENERAL_DISCOVERABLE : ESP_BT_NON_DISCOVERABLE;
     esp_err_t err = esp_bt_gap_set_scan_mode(conn, disc);
-    Serial.printf("classic discoverable=%d err=%d name=OpenHU-NativeBTBroker\n", discoverable, (int)err);
+    Serial.printf("classic discoverable=%d err=%d name=OpenHU-BTBroker\n", discoverable, (int)err);
 }
 
 int rfcomm_is_open(void)

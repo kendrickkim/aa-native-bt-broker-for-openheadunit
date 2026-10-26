@@ -148,7 +148,7 @@ static void add_indicate(BLEService *service, const char *uuid, BLECharacteristi
 
 void hu_ble_start(void)
 {
-    BLEDevice::init("OpenHU-NativeBTBroker-Setter");
+    BLEDevice::init("OpenHU-BTBroker-Setter");
     BLEDevice::setMTU(247);
     BLEDevice::setSecurityCallbacks(new BrokerSecurity());
     BLESecurity security;
@@ -178,7 +178,7 @@ void hu_ble_start(void)
     BLEAdvertising *advertising = BLEDevice::getAdvertising();
     advertising->addServiceUUID(BROKER_BLE_SERVICE);
     advertising->start();
-    Serial.println("advertising OpenHU-NativeBTBroker-Setter");
+    Serial.println("advertising OpenHU-BTBroker-Setter");
 }
 
 void hu_ble_poll(void)

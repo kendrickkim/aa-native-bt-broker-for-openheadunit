@@ -1,4 +1,4 @@
-# OpenHU-NativeBTBroker (ESP32)
+# OpenHU-BTBroker (ESP32)
 
 [한국어](readme-kr.md)
 
@@ -22,8 +22,8 @@ Hardware like the following can be used:
 
 | Path | Name |
 |---|---|
-| Classic Bluetooth | `OpenHU-NativeBTBroker` |
-| BLE advertising | `OpenHU-NativeBTBroker-Setter` |
+| Classic Bluetooth | `OpenHU-BTBroker` |
+| BLE advertising | `OpenHU-BTBroker-Setter` |
 | SPP service | `AndroidAuto` |
 | Pairing PIN | `0000` |
 | HFP role | Hands-Free (HF) |
@@ -71,7 +71,7 @@ All four files are required. Flashing only one of them can leave the board unabl
 5. Click **START**. If write fails and the board has a BOOT/IO0 button, hold BOOT, press RESET, release both, then try again.
 6. When you see `FINISH` / done, unplug and replug USB or press RESET to reboot.
 
-After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-NativeBTBroker` (classic) and `OpenHU-NativeBTBroker-Setter` (BLE). Pairing PIN is `0000`.
+After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-BTBroker` (classic) and `OpenHU-BTBroker-Setter` (BLE). Pairing PIN is `0000`.
 
 ### Command-line flash (optional)
 

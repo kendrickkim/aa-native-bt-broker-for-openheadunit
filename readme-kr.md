@@ -1,4 +1,4 @@
-# OpenHU-NativeBTBroker (ESP32)
+# OpenHU-BTBroker (ESP32)
 
 [English](readme.md)
 
@@ -22,8 +22,8 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 
 | 경로 | 이름 |
 |---|---|
-| 클래식 블루투스 | `OpenHU-NativeBTBroker` |
-| BLE 광고 | `OpenHU-NativeBTBroker-Setter` |
+| 클래식 블루투스 | `OpenHU-BTBroker` |
+| BLE 광고 | `OpenHU-BTBroker-Setter` |
 | SPP 서비스 | `AndroidAuto` |
 | 페어링 PIN | `0000` |
 | HFP 역할 | Hands-Free (HF) |
@@ -71,7 +71,7 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 5. **START**를 누릅니다. 보드에 BOOT/IO0 버튼이 있으면, 쓰기가 안 될 때 BOOT를 누른 채 RESET 후 손을 떼고 다시 시도합니다.
 6. `FINISH` / 완료가 뜨면 USB를 한 번 뽑았다가 다시 꽂거나 RESET을 눌러 재부팅합니다.
 
-성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-NativeBTBroker`(클래식) / `OpenHU-NativeBTBroker-Setter`(BLE)가 보이면 정상입니다. 페어링 PIN은 `0000`입니다.
+성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-BTBroker`(클래식) / `OpenHU-BTBroker-Setter`(BLE)가 보이면 정상입니다. 페어링 PIN은 `0000`입니다.
 
 ### 명령줄로 쓰기 (선택)
 
