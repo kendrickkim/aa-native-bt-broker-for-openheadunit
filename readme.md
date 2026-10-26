@@ -4,19 +4,27 @@
 
 A classic ESP32 sits between [OpenHeadUnit](https://github.com/andreknieriem/open-headunit) and an Android Auto phone. Like FYT BLINK/DUDUAUTO, it opens the Android Auto channel to the phone over classic Bluetooth RFCOMM, and relays those bytes to the head unit over BLE GATT write / indicate.
 
-If that support is not yet merged into [open-headunit](https://github.com/andreknieriem/open-headunit), apply the code from https://github.com/kendrickkim/headunit-revived/tree/with-bt-aa-broker.
+If that support is not yet merged into [open-headunit](https://github.com/andreknieriem/open-headunit), apply the code from https://github.com/kendrickkim/headunit-revived/tree/main-aa-native-bt-broker.
 
 The ESP32 does not parse Android Auto (WPP) payloads. Bytes from the head unit go to the phone RFCOMM; bytes from the phone are indicated to the head unit. Handshake and WifiStart/WifiInfo stay on the head unit.
 
+Prebuilt bins: [v1.0.0 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
+
 ## Hardware
 
-- ESP32 with Bluetooth Classic. ESP32-S3 has no Classic BT, so this firmware will not run on it.
+- **Original ESP32 with Bluetooth Classic only.** ESP32-S2, S3, C3, and C6 have no Classic BT, so this firmware will not run on them.
 - Assumes 4 MB flash. HFP, BLE, and RFCOMM do not fit the default 1.25 MB app partition, so the 3 MB `app0` from `huge_app_32mbit.csv` is used.
 - Wi-Fi is turned off at boot. Projection IP and SSID are not joined by the ESP32; the head unit delivers them to the phone over the RFCOMM relay.
 
 Hardware like the following can be used:
 
 <img src="images/esp32.png" width="300">
+
+## Head unit
+
+- Needs **Android 6.0 (API 23)+** for the BLE client path. Below that, the Bluetooth relay row stays visible but disabled.
+- In Native Mode settings, turn on **Use Bluetooth relay**, then open this screen to scan and pair.
+- With the switch off, a saved board is kept but Native Mode uses the normal Bluetooth route again.
 
 ## Visible names
 
@@ -34,21 +42,21 @@ Already-paired devices may keep an old name. Remove them from the list and scan 
 
 Order matters. The head unit must save the board over BLE before the phone can Classic-pair.
 
-1. On the head unit: enable Bluetooth relay (ESP32), **Scan**, select `OpenHU-BT-Relay-Setup`, and save it.
+1. On the head unit: enable **Use Bluetooth relay**, **Scan**, select `OpenHU-BT-Relay-Setup`, and save it.
 2. On the phone: forget any old `OpenHU-BT-Relay` entry (a leftover bond often blocks a new pair).
 3. On the head unit: tap **Pair phone** (PIN **0000**). The board clears its phone bonds and stays discoverable for about 120 seconds.
 4. On the phone: search and pair `OpenHU-BT-Relay` with PIN `0000` during that window.
-5. If pairing mode ends immediately after step 3, tap **Pair phone** once more, then retry step 4.
+5. If pairing mode ends immediately after step 3, tap **Pair phone** once more, then retry step 4. (Clearing an old bond can briefly look like “link up”; the firmware holds discoverable for a few seconds, but a second tap may still be needed.)
 
 ## Flashing from release bins only (no toolchain)
 
-You can write the firmware with only the shipped `.bin` files—no source or PlatformIO. Steps below are for Windows.
+You can write the firmware with only the shipped `.bin` files—no source or PlatformIO. Steps below are for Windows. Download the four bins (or the zip) from the [v1.0.0 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
 
 ### What you need
 
-- An **ESP32 board with Bluetooth Classic** (not ESP32-S3)
+- An **original ESP32 with Bluetooth Classic** (not S2 / S3 / C3 / C6)
 - USB cable to the PC
-- The bin files from the release folder (table below)
+- The bin files from the release (table below)
 - [ESP Flash Download Tool](https://www.espressif.com/en/support/download/other-tools) (official Espressif GUI)
 
 When you first plug the board in, Windows creates a COM port. Check Device Manager → Ports (COM & LPT) for `COMx` (e.g. `COM17`).
@@ -81,7 +89,7 @@ All four files are required. Flashing only one of them can leave the board unabl
 5. Click **START**. If write fails and the board has a BOOT/IO0 button, hold BOOT, press RESET, release both, then try again.
 6. When you see `FINISH` / done, unplug and replug USB or press RESET to reboot.
 
-After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-BT-Relay` (classic) and `OpenHU-BT-Relay-Setup` (BLE). Pairing PIN is `0000`. Requires an original ESP32 with Bluetooth Classic (not ESP32-S2/S3/C3/C6).
+After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-BT-Relay` (classic) and `OpenHU-BT-Relay-Setup` (BLE). Pairing PIN is `0000`.
 
 ### Command-line flash (optional)
 
@@ -118,7 +126,7 @@ For a release package, after `pio run` collect `bootloader.bin`, `partitions.bin
 1. After boot, once the classic stack is ready, the board stays discoverable for about 180 seconds. The head unit’s bonding command can reopen that window.
 2. When the head unit connects over BLE and sends `CMD_HELLO`, it gets `EVT_HELLO_ACK` and, if the stack is ready, `EVT_BT_READY`.
 3. HFP is off at boot. It is armed only for a new-phone pairing window or for `CMD_HFP_ON` / main-compat `CMD_AA_ENABLE`. Phone-initiated HFP while suppressed is refused. (`CMD_SET_NETWORK` is optional; WPP is sent by the head unit.)
-4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first. `CMD_HFP_OFF` drops HFP; `CMD_PROJECTION_UP` is status only.
+4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first. `CMD_HFP_OFF` drops HFP. `CMD_PROJECTION_UP` is status only: ignored while pairing, and if no further up is seen for 10 seconds the board clears a stale projection bit so the next wake can arm HFP again.
 5. Phone → `DATA_RFCOMM_RX` (≈ ZB) indicate; head unit → `DATA_RFCOMM_TX` (≈ AT#ZA) write.
 6. The head unit tops up RX credit with `EVT_CREDIT`. Without credit, phone bytes are dropped.
 7. If head-unit BLE stays down for 10 seconds, phone RFCOMM is closed and the relay is torn down.

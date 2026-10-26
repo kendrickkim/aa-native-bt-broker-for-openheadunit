@@ -4,19 +4,27 @@
 
 클래식 ESP32가 OpenHeadUnit(https://github.com/andreknieriem/open-headunit)과 Android Auto 폰 사이에 서 있는 브로커입니다. FYT BLINK/DUDUAUTO와 같이, 폰과는 클래식 블루투스 RFCOMM으로 Android Auto 채널을 열고, 헤드유닛과는 BLE GATT write / indicate로 그 바이트를 중계합니다.
 
-open-headunit(https://github.com/andreknieriem/open-headunit)의 코드에 이에 대한 내용이 적용(머지)되지 않았다면, https://github.com/kendrickkim/headunit-revived/tree/with-bt-aa-broker 의 코드를 적용해야 합니다.
+open-headunit(https://github.com/andreknieriem/open-headunit)의 코드에 이에 대한 내용이 적용(머지)되지 않았다면, https://github.com/kendrickkim/headunit-revived/tree/main-aa-native-bt-broker 의 코드를 적용해야 합니다.
 
 ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 넘긴 바이트는 폰 RFCOMM에 쓰고, 폰이 보낸 바이트는 헤드유닛으로 indicate합니다. 핸드셰이크와 WifiStart/WifiInfo는 헤드유닛이 담당합니다.
 
+미리 빌드된 bin: [v1.0.0 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
+
 ## 하드웨어
 
-- 클래식 Bluetooth가 있는 ESP32입니다. ESP32-S3에는 Bluetooth Classic이 없어서 이 펌웨어가 동작하지 않습니다.
+- **Bluetooth Classic이 있는 오리지널 ESP32만 사용합니다.** ESP32-S2, S3, C3, C6에는 Classic BT가 없어 이 펌웨어가 동작하지 않습니다.
 - 플래시 4MB를 가정합니다. HFP, BLE, RFCOMM이 기본 1.25MB 앱 파티션에 들어가지 않아 `huge_app_32mbit.csv`의 3MB `app0`을 사용합니다.
 - 시작 시 Wi-Fi 라디오는 끕니다. 프로젝션용 IP와 SSID는 ESP32가 직접 접속하지 않고, 헤드유닛이 RFCOMM 중계로 폰에 전달합니다.
 
 다음과 같은 하드웨어를 사용할 수 있습니다.
 
 <img src="images/esp32.png" width="300">
+
+## 헤드유닛
+
+- BLE 클라이언트 경로에 **Android 6.0(API 23) 이상**이 필요합니다. 그 미만에서는 블루투스 릴레이 행이 보이지만 비활성입니다.
+- Native Mode 설정에서 **블루투스 릴레이 사용**을 켠 뒤, 이 화면에서 검색·페어링합니다.
+- 스위치를 끄면 저장한 보드는 유지하되, Native Mode는 다시 일반 블루투스 경로를 씁니다.
 
 ## 보이는 이름
 
@@ -34,21 +42,21 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 
 순서가 중요합니다. 헤드유닛이 BLE로 보드를 먼저 저장한 뒤에야 폰이 Classic으로 페어링할 수 있습니다.
 
-1. 헤드유닛: 블루투스 릴레이(ESP32)를 켠 뒤 **검색**으로 `OpenHU-BT-Relay-Setup`을 골라 저장합니다.
+1. 헤드유닛: **블루투스 릴레이 사용**을 켠 뒤 **검색**으로 `OpenHU-BT-Relay-Setup`을 골라 저장합니다.
 2. 스마트폰: 예전 `OpenHU-BT-Relay` 항목을 삭제합니다(남은 본드가 있으면 재페어링이 자주 실패합니다).
 3. 헤드유닛: **폰 페어링**을 누릅니다(PIN **0000**). 보드는 폰 본드를 지우고 약 120초 동안 검색 가능 상태가 됩니다.
 4. 스마트폰: 그 시간 안에 `OpenHU-BT-Relay`를 검색해 PIN `0000`으로 페어링합니다.
-5. 3번 직후 페어링 모드가 바로 끝나면 **폰 페어링**을 한 번 더 누른 뒤 4번을 다시 시도합니다.
+5. 3번 직후 페어링 모드가 바로 끝나면 **폰 페어링**을 한 번 더 누른 뒤 4번을 다시 시도합니다. (구본드 삭제 직후 잠깐 “링크 업”처럼 보일 수 있어 펌웨어가 수 초간 검색 가능 상태를 유지하지만, 그래도 한 번 더 눌러야 할 수 있습니다.)
 
 ## 릴리스 bin만으로 플래시하기 (개발 환경 없이)
 
-소스나 PlatformIO 없이, 배포된 `.bin` 파일만으로 ESP32에 펌웨어를 쓸 수 있습니다. Windows 기준으로 설명합니다.
+소스나 PlatformIO 없이, 배포된 `.bin` 파일만으로 ESP32에 펌웨어를 쓸 수 있습니다. Windows 기준으로 설명합니다. [v1.0.0 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0)에서 네 개 bin(또는 zip)을 받습니다.
 
 ### 준비물
 
-- **클래식 Bluetooth가 있는 ESP32** 보드 (ESP32-S3 등은 불가)
+- **클래식 Bluetooth가 있는 오리지널 ESP32** 보드 (S2 / S3 / C3 / C6 불가)
 - USB 케이블로 PC에 연결
-- 릴리스 폴더에 들어 있는 bin 파일들 (아래 표)
+- 릴리스에 들어 있는 bin 파일들 (아래 표)
 - [ESP Flash Download Tool](https://www.espressif.com/en/support/download/other-tools) (Espressif 공식, GUI)
 
 보드를 처음 꽂으면 Windows가 COM 포트를 만듭니다. 장치 관리자 → 포트(COM & LPT)에서 `COMx` 번호를 확인하세요. (예: `COM17`)
@@ -81,7 +89,7 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 5. **START**를 누릅니다. 보드에 BOOT/IO0 버튼이 있으면, 쓰기가 안 될 때 BOOT를 누른 채 RESET 후 손을 떼고 다시 시도합니다.
 6. `FINISH` / 완료가 뜨면 USB를 한 번 뽑았다가 다시 꽂거나 RESET을 눌러 재부팅합니다.
 
-성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-BT-Relay`(클래식) / `OpenHU-BT-Relay-Setup`(BLE)이 보이면 정상입니다. 페어링 PIN은 `0000`입니다. Bluetooth Classic이 있는 오리지널 ESP32만 사용합니다(S2/S3/C3/C6 불가).
+성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-BT-Relay`(클래식) / `OpenHU-BT-Relay-Setup`(BLE)이 보이면 정상입니다. 페어링 PIN은 `0000`입니다.
 
 ### 명령줄로 쓰기 (선택)
 
@@ -118,7 +126,7 @@ pio device monitor
 1. 부팅 후 클래식 스택이 준비되면 약 180초 동안 검색 가능 상태가 됩니다. 헤드유닛의 본딩 명령으로 이 창을 다시 열 수 있습니다.
 2. 헤드유닛이 BLE로 접속하고 `CMD_HELLO`를 보내면 `EVT_HELLO_ACK`와, 스택이 준비됐다면 `EVT_BT_READY`를 받습니다.
 3. 부팅 시 HFP는 꺼져 있습니다. 신규 페어링 창, 또는 `CMD_HFP_ON` / main 호환 `CMD_AA_ENABLE` 전에만 켭니다. 그 외 폰이 먼저 거는 HFP는 거절합니다. (`CMD_SET_NETWORK`는 선택이며 WPP는 헤드유닛이 보냅니다.)
-4. 폰 HFP가 올라오면 `EVT_PHONE_LINK`(≈ JH), Android Auto RFCOMM이 열리면 `EVT_RFCOMM_OPEN`(≈ AA). 이후 헤드유닛이 먼저 WPP를 보냅니다. `CMD_HFP_OFF`로 HFP를 끊고, `CMD_PROJECTION_UP`은 상태만 알립니다.
+4. 폰 HFP가 올라오면 `EVT_PHONE_LINK`(≈ JH), Android Auto RFCOMM이 열리면 `EVT_RFCOMM_OPEN`(≈ AA). 이후 헤드유닛이 먼저 WPP를 보냅니다. `CMD_HFP_OFF`로 HFP를 끊습니다. `CMD_PROJECTION_UP`은 상태만 알리며, 페어링 중에는 무시하고, 10초 동안 추가 up이 없으면 오래된 프로젝션 비트를 지워 다음 wake에서 HFP를 다시 켤 수 있게 합니다.
 5. 폰 → `DATA_RFCOMM_RX`(≈ ZB) indicate, 헤드유닛 → `DATA_RFCOMM_TX`(≈ AT#ZA) write.
 6. 헤드유닛은 `EVT_CREDIT`으로 RX 크레딧을 채웁니다. 크레딧이 없으면 폰 바이트는 버려집니다.
 7. 헤드유닛 BLE가 10초 동안 내려가 있으면 폰 RFCOMM을 끊고 중계를 내립니다.
