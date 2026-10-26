@@ -10,14 +10,14 @@ void setup()
 {
     Serial.begin(115200);
     delay(200);
-    Serial.println("OpenHU-BTBroker");
+    Serial.println("OpenHU-BT-Relay");
     broker_self_check();
     WiFi.mode(WIFI_OFF);
 
     broker_runtime_init();
     rfcomm_bridge_init();
     hu_ble_start();
-    Serial.println("Classic name OpenHU-BTBroker, BLE name OpenHU-BTBroker-Setter, HFP role HF");
+    Serial.println("Classic name OpenHU-BT-Relay, BLE name OpenHU-BT-Relay-Setup, HFP role HF");
 }
 
 /** 브로커 큐를 비우고 WPP 시간 제한을 확인한다. */

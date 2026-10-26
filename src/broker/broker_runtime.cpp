@@ -79,10 +79,13 @@ static int s_pairing;
 static int s_pair_down;
 static int s_pair_fired;
 static uint32_t s_pair_hold_at;
+/** After bond-clear, RFCOMM/HFP may still report up briefly — do not close the window yet. */
+static uint32_t s_pair_link_grace_until;
 static const int PIN_PAIR = 0;
 static const int PIN_LED = 2;
 static const uint32_t PAIR_HOLD_MS = 5000;
 static const uint16_t PAIR_SECONDS = 120;
+static const uint32_t PAIR_LINK_GRACE_MS = 3000;
 /** 부팅 뒤 마지막 폰으로 HFP를 다시 거는 시각. 0이면 시도하지 않는다. */
 static uint32_t s_reconnect_until;
 static uint32_t s_reconnect_next;
@@ -94,6 +97,9 @@ static uint8_t s_credit;
 static const uint8_t CREDIT_CAP = 8;
 /** 프로젝션 소켓이 올라가 있다고 헤드유닛이 알린 상태. 상태 표시용. */
 static int s_projection;
+/** Last CMD_PROJECTION_UP=1. Quiet longer than this → clear stale projection. */
+static uint32_t s_projection_at;
+static const uint32_t PROJECTION_SILENCE_MS = 10000;
 /** Active RFCOMM connection generation from MSG_RFCOMM_OPEN. */
 static uint32_t s_rfcomm_gen;
 /**
@@ -107,6 +113,19 @@ static int s_hfp_suppressed = 1;
 static int s_hfp_cmd_used;
 /** Non-zero: millis deadline unused on apply_hfp once HU owns HFP_OFF. */
 static uint32_t s_hfp_release_at;
+
+static void clear_projection(const char *why)
+{
+    if (!s_projection) {
+        s_projection_at = 0;
+        return;
+    }
+    s_projection = 0;
+    s_projection_at = 0;
+    if (why != nullptr) {
+        Serial.printf("projection cleared (%s)\n", why);
+    }
+}
 
 static void apply_hfp_off(const char *why)
 {
@@ -123,23 +142,27 @@ static void apply_hfp_off(const char *why)
 /** Allow inbound HFP (pairing) and/or dial bonded phones (AA wake). */
 static void apply_hfp_on(const char *why)
 {
-    if (s_projection) {
+    /* Pairing must arm HFP even if a stale PROJECTION_UP bit is still set. */
+    if (s_projection && !s_pairing) {
         Serial.printf("HFP on ignored (projection up, %s)\n", why ? why : "");
         return;
+    }
+    if (s_pairing) {
+        clear_projection("pairing HFP on");
     }
     s_hfp_suppressed = 0;
     s_hfp_release_at = 0;
     s_reconnect_until = 0;
     Serial.printf("HFP on (%s)\n", why ? why : "CMD_HFP_ON");
-    hfp_hf_connect_bonded();
+    if (!s_pairing) {
+        hfp_hf_connect_bonded();
+    }
 }
 
 /** Pairing window: accept inbound HFP, do not dial old bonds. */
 static void arm_hfp_for_pairing(void)
 {
-    if (s_projection) {
-        return;
-    }
+    clear_projection("pairing arm");
     s_hfp_suppressed = 0;
     s_hfp_release_at = 0;
     s_reconnect_until = 0;
@@ -448,7 +471,7 @@ static void prepare_new_phone(void)
     s_hfp_cmd_used = 0;
     hfp_hf_disconnect();
     rfcomm_disconnect();
-    s_projection = 0;
+    clear_projection(nullptr);
     s_credit = 0;
     s_rx_pend_len = 0;
     s_tx_pend_len = 0;
@@ -476,6 +499,7 @@ static void leave_pairing(void)
     const int was = s_pairing;
     s_bond_until = 0;
     s_pairing = 0;
+    s_pair_link_grace_until = 0;
     digitalWrite(PIN_LED, LOW);
     rfcomm_set_discoverable(0);
     Serial.println("pairing mode ended");
@@ -582,9 +606,19 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
     case CMD_PROJECTION_UP: {
         /* main: status only. apply_hfp HU sends CMD_HFP_OFF on the rising edge. */
         const uint8_t up = (len > 0 && payload != nullptr && payload[0] != 0) ? 1 : 0;
+        /* Heartbeat must not re-arm projection during a new-phone pairing window. */
+        if (up && s_pairing) {
+            Serial.println("PROJECTION_UP ignored (pairing)");
+            break;
+        }
         const uint8_t was = s_projection;
-        s_projection = up;
-        if (was != up) {
+        if (up) {
+            s_projection = 1;
+            s_projection_at = millis();
+        } else {
+            clear_projection(nullptr);
+        }
+        if (was != s_projection) {
             emit_status();
         }
         break;
@@ -616,6 +650,10 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
         } else {
             if (mode == 2) {
                 prepare_new_phone();
+                /* Bond/RFCOMM teardown is async; ignore stale "link up" for a few seconds. */
+                s_pair_link_grace_until = millis() + PAIR_LINK_GRACE_MS;
+            } else {
+                s_pair_link_grace_until = 0;
             }
             enter_pairing(seconds);
         }
@@ -842,7 +880,12 @@ void broker_poll(void)
     hu_ble_poll();
     poll_pair_button();
     if (s_pairing && (rfcomm_is_open() || hfp_hf_is_up())) {
-        leave_pairing();
+        if (s_pair_link_grace_until != 0 &&
+            (int32_t)(millis() - s_pair_link_grace_until) < 0) {
+            /* Stale link after clear_bonds — keep Classic discoverable open. */
+        } else {
+            leave_pairing();
+        }
     }
     if (s_bond_until != 0 && (int32_t)(millis() - s_bond_until) >= 0) {
         if (s_pairing) {
@@ -855,13 +898,18 @@ void broker_poll(void)
     /* apply_hfp: no autonomous HFP reconnect — only CMD_HFP_ON or main-compat AA_ENABLE. */
     s_reconnect_until = 0;
     s_reconnect_next = 0;
+    if (s_projection && s_projection_at != 0 &&
+        (int32_t)(millis() - s_projection_at) >= (int32_t)PROJECTION_SILENCE_MS) {
+        clear_projection("heartbeat lost 10s");
+        emit_status();
+    }
     if (!s_ble_up && s_ble_down_at != 0 && (int32_t)(millis() - s_ble_down_at) >= 10000) {
         s_ble_down_at = 0;
         if (rfcomm_is_open()) {
             Serial.println("head unit BLE down for 10s; closing the phone link");
             rfcomm_disconnect();
         }
-        s_projection = 0;
+        clear_projection(nullptr);
         s_credit = 0;
         s_rx_pend_len = 0;
         s_tx_pend_len = 0;

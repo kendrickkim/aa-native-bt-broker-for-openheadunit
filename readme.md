@@ -1,4 +1,4 @@
-# OpenHU-BTBroker (ESP32)
+# OpenHU-BT-Relay (ESP32)
 
 [한국어](readme-kr.md)
 
@@ -22,13 +22,23 @@ Hardware like the following can be used:
 
 | Path | Name |
 |---|---|
-| Classic Bluetooth | `OpenHU-BTBroker` |
-| BLE advertising | `OpenHU-BTBroker-Setter` |
+| Classic Bluetooth | `OpenHU-BT-Relay` |
+| BLE advertising | `OpenHU-BT-Relay-Setup` |
 | SPP service | `AndroidAuto` |
 | Pairing PIN | `0000` |
 | HFP role | Hands-Free (HF) |
 
 Already-paired devices may keep an old name. Remove them from the list and scan again for the new name to appear.
+
+## Pair a phone (head unit + board)
+
+Order matters. The head unit must save the board over BLE before the phone can Classic-pair.
+
+1. On the head unit: enable Bluetooth relay (ESP32), **Scan**, select `OpenHU-BT-Relay-Setup`, and save it.
+2. On the phone: forget any old `OpenHU-BT-Relay` entry (a leftover bond often blocks a new pair).
+3. On the head unit: tap **Pair phone** (PIN **0000**). The board clears its phone bonds and stays discoverable for about 120 seconds.
+4. On the phone: search and pair `OpenHU-BT-Relay` with PIN `0000` during that window.
+5. If pairing mode ends immediately after step 3, tap **Pair phone** once more, then retry step 4.
 
 ## Flashing from release bins only (no toolchain)
 
@@ -71,7 +81,7 @@ All four files are required. Flashing only one of them can leave the board unabl
 5. Click **START**. If write fails and the board has a BOOT/IO0 button, hold BOOT, press RESET, release both, then try again.
 6. When you see `FINISH` / done, unplug and replug USB or press RESET to reboot.
 
-After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-BTBroker` (classic) and `OpenHU-BTBroker-Setter` (BLE). Pairing PIN is `0000`.
+After a successful flash, the phone/head-unit Bluetooth lists should show `OpenHU-BT-Relay` (classic) and `OpenHU-BT-Relay-Setup` (BLE). Pairing PIN is `0000`. Requires an original ESP32 with Bluetooth Classic (not ESP32-S2/S3/C3/C6).
 
 ### Command-line flash (optional)
 

@@ -1,4 +1,4 @@
-# OpenHU-BTBroker (ESP32)
+# OpenHU-BT-Relay (ESP32)
 
 [English](readme.md)
 
@@ -22,13 +22,23 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 
 | 경로 | 이름 |
 |---|---|
-| 클래식 블루투스 | `OpenHU-BTBroker` |
-| BLE 광고 | `OpenHU-BTBroker-Setter` |
+| 클래식 블루투스 | `OpenHU-BT-Relay` |
+| BLE 광고 | `OpenHU-BT-Relay-Setup` |
 | SPP 서비스 | `AndroidAuto` |
 | 페어링 PIN | `0000` |
 | HFP 역할 | Hands-Free (HF) |
 
 이미 페어링된 기기에는 이전 이름이 남을 수 있습니다. 목록에서 지운 뒤 다시 검색해야 새 이름이 보입니다.
+
+## 폰 페어링 (헤드유닛 + 보드)
+
+순서가 중요합니다. 헤드유닛이 BLE로 보드를 먼저 저장한 뒤에야 폰이 Classic으로 페어링할 수 있습니다.
+
+1. 헤드유닛: 블루투스 릴레이(ESP32)를 켠 뒤 **검색**으로 `OpenHU-BT-Relay-Setup`을 골라 저장합니다.
+2. 스마트폰: 예전 `OpenHU-BT-Relay` 항목을 삭제합니다(남은 본드가 있으면 재페어링이 자주 실패합니다).
+3. 헤드유닛: **폰 페어링**을 누릅니다(PIN **0000**). 보드는 폰 본드를 지우고 약 120초 동안 검색 가능 상태가 됩니다.
+4. 스마트폰: 그 시간 안에 `OpenHU-BT-Relay`를 검색해 PIN `0000`으로 페어링합니다.
+5. 3번 직후 페어링 모드가 바로 끝나면 **폰 페어링**을 한 번 더 누른 뒤 4번을 다시 시도합니다.
 
 ## 릴리스 bin만으로 플래시하기 (개발 환경 없이)
 
@@ -71,7 +81,7 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 5. **START**를 누릅니다. 보드에 BOOT/IO0 버튼이 있으면, 쓰기가 안 될 때 BOOT를 누른 채 RESET 후 손을 떼고 다시 시도합니다.
 6. `FINISH` / 완료가 뜨면 USB를 한 번 뽑았다가 다시 꽂거나 RESET을 눌러 재부팅합니다.
 
-성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-BTBroker`(클래식) / `OpenHU-BTBroker-Setter`(BLE)가 보이면 정상입니다. 페어링 PIN은 `0000`입니다.
+성공 후 폰/헤드유닛 블루투스 목록에 `OpenHU-BT-Relay`(클래식) / `OpenHU-BT-Relay-Setup`(BLE)이 보이면 정상입니다. 페어링 PIN은 `0000`입니다. Bluetooth Classic이 있는 오리지널 ESP32만 사용합니다(S2/S3/C3/C6 불가).
 
 ### 명령줄로 쓰기 (선택)
 
