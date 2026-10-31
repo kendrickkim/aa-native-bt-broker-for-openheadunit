@@ -22,8 +22,9 @@ Hardware like the following can be used:
 
 ## Head unit
 
-- Needs **Android 6.0 (API 23)+** for the BLE client path. Below that, the Bluetooth relay row stays visible but disabled.
-- In Native Mode settings, turn on **Use Bluetooth relay**, then open this screen to scan and pair.
+- Needs **Android 6.0 (API 23)+** for the BLE client path. Below that, the Bluetooth relay settings row is hidden.
+- Connection mode must be **Native wireless**.
+- In settings, open **Bluetooth relay (ESP32)**, turn on **Use Bluetooth relay**, then scan and pair.
 - With the switch off, a saved board is kept but Native Mode uses the normal Bluetooth route again.
 
 ## Visible names
@@ -38,15 +39,47 @@ Hardware like the following can be used:
 
 Already-paired devices may keep an old name. Remove them from the list and scan again for the new name to appear.
 
+## What you need
+
+- An **original ESP32** board. ESP32-S2, S3, C3, and C6 have no Bluetooth Classic and do not work.
+- Firmware from the release that matches this app version.
+- A head unit on **Android 6.0 or later**, with connection mode set to **Native wireless**.
+
 ## Pair a phone (head unit + board)
 
 Order matters. The head unit must save the board over BLE before the phone can Classic-pair.
 
-1. On the head unit: enable **Use Bluetooth relay**, **Scan**, select `OpenHU-BT-Relay-Setup`, and save it.
-2. On the phone: forget any old `OpenHU-BT-Relay` entry (a leftover bond often blocks a new pair).
-3. On the head unit: tap **Pair phone** (PIN **0000**). The board clears its phone bonds and stays discoverable for about 120 seconds.
-4. On the phone: search and pair `OpenHU-BT-Relay` with PIN `0000` during that window.
-5. If pairing mode ends immediately after step 3, tap **Pair phone** once more, then retry step 4. (Clearing an old bond can briefly look like “link up”; the firmware holds discoverable for a few seconds, but a second tap may still be needed.)
+### 1. On the phone, remove old entries
+
+1. Open Bluetooth settings.
+2. **Remove the head unit itself** if it is in the list. If you do not, Android Auto keeps dialling the head unit and never uses the board.
+3. Remove any old `OpenHU-BT-Relay` entry.
+
+### 2. On the head unit, connect to the board
+
+1. Power the board.
+2. Open **Settings → Bluetooth relay (ESP32)** and switch it on.
+3. Tap **Scan**, then select `OpenHU-BT-Relay-Setup`.
+4. Wait for **Phone: pair OpenHU-BT-Relay now — PIN 0000 (120 s)**. Selecting the board opens that window by itself.
+
+### 3. On the phone, pair with the board
+
+1. In Bluetooth settings, tap Pair new device.
+2. Select `OpenHU-BT-Relay`.
+3. Tap Pair. If the phone asks for a PIN, enter **0000**.
+4. On the head unit, check that the status shows the phone as paired / connected.
+
+### 4. Start Android Auto
+
+Start Android Auto as you do for Native wireless. The head unit wakes the phone through the board.
+
+### If something goes wrong
+
+| Problem | What to do |
+|---|---|
+| Pairing window closed before you paired | On the head unit, open **Settings → Bluetooth relay (ESP32)** and tap **Pair phone** to open the 120 s window again. |
+| Scan finds nothing | Reset the board, then scan again. |
+| Android Auto does not start | Check that the **head unit itself** is not still in the phone’s Bluetooth list. |
 
 ## Flashing from release bins only (no toolchain)
 
@@ -126,7 +159,7 @@ For a release package, after `pio run` collect `bootloader.bin`, `partitions.bin
 1. After boot, once the classic stack is ready, the board stays discoverable for about 180 seconds. The head unit’s bonding command can reopen that window.
 2. When the head unit connects over BLE and sends `CMD_HELLO`, it gets `EVT_HELLO_ACK` and, if the stack is ready, `EVT_BT_READY`.
 3. HFP is off at boot. It is armed only for a new-phone pairing window or for `CMD_HFP_ON` / main-compat `CMD_AA_ENABLE`. Phone-initiated HFP while suppressed is refused. (`CMD_SET_NETWORK` is optional; WPP is sent by the head unit.)
-4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first. `CMD_HFP_OFF` drops HFP. `CMD_PROJECTION_UP` is status only: ignored while pairing, and if no further up is seen for 10 seconds the board clears a stale projection bit so the next wake can arm HFP again.
+4. Phone HFP up → `EVT_PHONE_LINK` (≈ JH); Android Auto RFCOMM open → `EVT_RFCOMM_OPEN` (≈ AA). The head unit then sends WPP first. `CMD_HFP_OFF` drops HFP. `CMD_PROJECTION_UP` is status only: ignored while pairing. A stale projection bit is cleared when HU BLE drops, on the next `CMD_HELLO`, or if no further up is seen for 10 seconds — so a force-killed app cannot block the next `HFP_ON` / `AA_ENABLE`.
 5. Phone → `DATA_RFCOMM_RX` (≈ ZB) indicate; head unit → `DATA_RFCOMM_TX` (≈ AT#ZA) write.
 6. The head unit tops up RX credit with `EVT_CREDIT`. Without credit, phone bytes are dropped.
 7. If head-unit BLE stays down for 10 seconds, phone RFCOMM is closed and the relay is torn down.

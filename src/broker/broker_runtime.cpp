@@ -575,6 +575,10 @@ static void on_frame(const uint8_t *frame, uint16_t frame_len)
 #endif
     switch (type) {
     case CMD_HELLO: {
+        /* Fresh HU control session: drop a stale projection bit left by a killed app
+         * so the next HFP_ON / AA_ENABLE is not ignored as "projection up". */
+        clear_projection("HU HELLO");
+        s_hfp_cmd_used = 0;
         uint8_t ack[9] = {BROKER_VERSION, 'b', 'r', 'o', 'k', 'e', 'r', '1', 0};
         emit(EVT_HELLO_ACK, BROKER_CH_CONTROL, ack, sizeof(ack), 0);
         announce_bt_ready(0);
@@ -738,6 +742,9 @@ void broker_ble_down(void)
     broker_frag_reset(&s_data_frag);
     s_bt_announced = 0;
     s_ble_up = 0;
+    /* Do not wait for the 10s PROJECTION_UP silence timer: the HU is gone, so
+     * a leftover projection bit would block HFP_ON until that timer fired. */
+    clear_projection("HU BLE down");
     if (s_ble_down_at == 0) {
         s_ble_down_at = millis();
     }
