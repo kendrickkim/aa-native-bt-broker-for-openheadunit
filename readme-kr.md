@@ -8,7 +8,7 @@ open-headunit(https://github.com/andreknieriem/open-headunit)의 코드에 이�
 
 ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 넘긴 바이트는 폰 RFCOMM에 쓰고, 폰이 보낸 바이트는 헤드유닛으로 indicate합니다. 핸드셰이크와 WifiStart/WifiInfo는 헤드유닛이 담당합니다.
 
-미리 빌드된 bin: [v1.0.0 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
+미리 빌드된 bin: [v1.0.1 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.1).
 
 ## 하드웨어
 
@@ -83,7 +83,7 @@ ESP32는 Android Auto(WPP) 본문을 해석하지 않습니다. 헤드유닛이 
 
 ## 릴리스 bin만으로 플래시하기 (개발 환경 없이)
 
-소스나 PlatformIO 없이, 배포된 `.bin` 파일만으로 ESP32에 펌웨어를 쓸 수 있습니다. Windows 기준으로 설명합니다. [v1.0.0 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0)에서 네 개 bin(또는 zip)을 받습니다.
+소스나 PlatformIO 없이, 배포된 `.bin` 파일만으로 ESP32에 펌웨어를 쓸 수 있습니다. Windows 기준으로 설명합니다. [v1.0.1 릴리스](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.1)에서 네 개 bin(또는 zip)을 받습니다.
 
 ### 준비물
 

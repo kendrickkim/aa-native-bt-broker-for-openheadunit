@@ -8,7 +8,7 @@ If that support is not yet merged into [open-headunit](https://github.com/andrek
 
 The ESP32 does not parse Android Auto (WPP) payloads. Bytes from the head unit go to the phone RFCOMM; bytes from the phone are indicated to the head unit. Handshake and WifiStart/WifiInfo stay on the head unit.
 
-Prebuilt bins: [v1.0.0 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
+Prebuilt bins: [v1.0.1 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.1).
 
 ## Hardware
 
@@ -83,7 +83,7 @@ Start Android Auto as you do for Native wireless. The head unit wakes the phone 
 
 ## Flashing from release bins only (no toolchain)
 
-You can write the firmware with only the shipped `.bin` files—no source or PlatformIO. Steps below are for Windows. Download the four bins (or the zip) from the [v1.0.0 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.0).
+You can write the firmware with only the shipped `.bin` files—no source or PlatformIO. Steps below are for Windows. Download the four bins (or the zip) from the [v1.0.1 release](https://github.com/kendrickkim/aa-native-bt-broker-for-openheadunit/releases/tag/v1.0.1).
 
 ### What you need
 
